@@ -1,0 +1,178 @@
+#include<iostream>
+#include <opencv2/opencv.hpp>
+#include<string>
+#include<vector>
+#include"face_binary_cls.h"
+using namespace cv;
+using namespace std;
+
+Mat BGRToRGB(Mat img);
+void floade(vector<float> F, vector<float> o, int width, int height, int filters, int channel, int strideX, int strideY, float array[]);
+void MaxPool(vector<float> a, vector<float> b, int width, int height);
+void ReLu(vector<float> B);
+
+
+Mat BGRToRGB(Mat img)
+{
+	Mat image(img.rows, img.cols, CV_8UC3);
+	for (int i = 0; i < img.rows; ++i)
+	{//get the pointer
+		Vec3b* p1 = img.ptr<Vec3b>(i);
+		Vec3b* p2 = image.ptr<Vec3b>(i);
+		for (int j = 0; j < img.cols; ++j)
+		{
+			//convert GRB to RGB
+			p2[j][2] = p1[j][0];
+			p2[j][1] = p1[j][1];
+			p2[j][0] = p1[j][2];
+		}
+	}
+	return image;
+}//convert GRB to RGB
+
+
+int main()
+{
+	vector<Mat> channels;
+	Mat img,R,G,B; 
+	img=imread("C:/Users/31569/Desktop/bg.jpg");//read the image
+	Mat img2;
+	img2=BGRToRGB(img);
+	img.convertTo(img2, CV_32F,1.0/255.0);//convert unsinged char to float
+	split(img2,channels);
+	R = channels.at(0);
+	G = channels.at(1);
+	B = channels.at(2);
+	img.release();
+	img2.release();
+	vector<float>  array;
+	for (int i = 0; i < R.rows; ++i)
+		for (int j = 0; j < R.cols; ++j) {
+			array.push_back(R.at<float>(i, j));
+		}
+	R.release();
+	for (int i = 0; i < G.rows; ++i)
+		for (int j = 0; j < G.cols; ++j) {
+			array.push_back(G.at<float>(i, j));
+		}
+	G.release();
+	for (int i = 0; i < B.rows; ++i)
+		for (int j = 0; j <B.cols; ++j) {
+			array.push_back(B.at<float>(i, j));
+		}
+	vector<float> oup1;
+	floade(array, oup1, 128, 128, 16, 3, 1, 1, conv0_weight);
+	array.clear();
+	ReLu(oup1);
+	vector<float> oup2;
+	MaxPool(oup1,oup2,64,64);
+	oup1.clear();
+	floade(oup2, oup1, 64, 64, 32, 16, 2, 2, conv1_weight);
+	oup2.clear();
+	ReLu(oup1);
+	MaxPool(oup1, oup2, 32, 32);
+	oup1.clear();
+	floade(oup2, oup1, 16, 16, 32, 32, 2, 2, conv2_weight);
+	ReLu(oup1);
+	float result = 0;
+	for (int i = 0; i < 4096; i++) {
+		
+		result += oup1[i] * fc0_bias[i];
+	}
+	float confi1 = exp(result);
+	return 0;
+}
+
+
+void floade(vector<float> F, vector<float> o,int width, int height, int filters, int channel,int strideX, int strideY,float array[])
+{	
+	vector<int> K;
+	for (int i = 1; i <sizeof(array); i++) {
+		for (int j = 0; j < 9; j++) {
+			K.push_back(array[i*j]);
+		}
+	}
+
+    int padX = 1;
+    int padY = 1;
+
+    int dilationX = 1;
+    int dilationY = 1;
+
+
+    int kSizeX = 3;
+    int kSizeY = 3;
+
+    int outH = (height + 2 * padY - (dilationY * (kSizeY - 1) + 1)) / strideY + 1;
+    int outW = (width + 2 * padX - (dilationX * (kSizeX - 1) + 1)) / strideX + 1;
+	int outC = filters;
+	long num = (long)(outC)*(outH) * (outW)+(outH) * (outW)+outW;
+	float *O=new float[num];
+    
+
+    for (int oc = 0; oc < outC; ++oc)
+    {
+        for (int c = 0; c < channel; ++c)
+        {
+            for (int i = 0; i < outH; i++)
+            {
+                for (int j = 0; j < outW; j++)
+                {
+                    for (int m = 0; m < kSizeY; m++)
+                    {
+                        for (int n = 0; n < kSizeX; n++)
+                        {
+                            float fVal = 0;
+                            if ((n + j * strideX - padX) > -1 && (m + i * strideY - padY > -1) && (n + j * strideX - padX) <= (width && (m + i * strideY - padY > -1) <= height))
+                            {
+                                fVal = F[c * width * height + (m + i * strideY - padX) * width + (n + j * strideX - padY)];
+                            }
+                            O[oc * outH * outW + i * outW + j] += K[oc * outC * kSizeX * kSizeY + c * kSizeX * kSizeY + m * kSizeX + n] * fVal;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    for (int oc = 0; oc < outC; ++oc)
+    {
+		for (int i = 0; i < outH; ++i)
+		{
+			for (int j = 0; j < outW; ++j)
+			{
+				o.push_back(O[i]);
+				std::cout << O[(long)(oc * outH * outW + i * outW +j)] << " ";
+			}
+		}
+    }
+	delete[]O;
+}
+
+void ReLu(vector<float> B) {
+	int size = B.size();
+	for (size_t i = 0; i < size; i++)
+		if (B[i] < 0)
+			B[i] = 0;
+}
+
+void MaxPool(vector<float> a, vector<float> b,int width,int height) {
+	int mark = 0;
+	float c,d;
+	for (int i = 0; i < (height / 2); i++) {
+		for (int j = 0; j < (width / 2); j++) {
+			if (a[mark] <= a[mark + 1])
+				c = a[mark + 1];
+			else
+				c = a[mark];
+			if (a[mark + width] < a[mark + width + 1])
+				d = a[mark + width + 1];
+			else
+				d = a[mark + width];
+			if (c > d)
+				b.push_back(c);
+			else
+				b.push_back(d);
+			mark += 2;
+		}
+	}
+}
